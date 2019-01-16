@@ -7,6 +7,7 @@
 #include "include/matrix.h"
 #include "include/iterator.h"
 #include "include/builder.h"
+#include "include/tools.h"
 using namespace Mx;
 using namespace std;
 
@@ -22,5 +23,10 @@ int main() {
     cout<<mat3<<endl;
 
     cout<<(mat3->col_wise()+mat3->col(0)->copy())<<endl;
+
+    auto e = Eye<int>(5);
+
+    cout<<e->row({1,2,3,1,2,3,0,4,1,2,3,0})<<endl;
+
 	_CrtDumpMemoryLeaks();
 }
