@@ -11,17 +11,16 @@ using namespace Mx;
 using namespace std;
 
 int main() {
-    Matrix<double> mat(3,3,0);
+    Matrix<int> mat(3,3,0);
     mat->inputter()<<1,2,3,4,5,6,7,8,9;
     cout<<mat<<endl;
 
-    auto mat2 = mat->col(0,2);
+    auto mat2 = mat->row({0,1,0});
+    cout<<mat2<<endl;
 
-    RowwiseBuilder<double> mb;
-    for(auto r:mat2->row_items()) {
-        mb.add(r);
-    }
-    cout<<mb.build()<<endl;
+    auto mat3 = mat->col(0) % mat2->col_wise();
+    cout<<mat3<<endl;
 
+    cout<<(mat3->col_wise()+mat3->col(0)->copy())<<endl;
 	_CrtDumpMemoryLeaks();
 }

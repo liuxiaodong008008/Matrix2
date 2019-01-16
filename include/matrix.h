@@ -7,6 +7,7 @@
 
 #include <iostream>
 #include <string>
+#include <type_traits>
 #include "../include/utility.h"
 #include "../include/index.h"
 #include "../include/iterator.h"
@@ -24,6 +25,7 @@ namespace Mx {
     template <typename T> class _MatrixRangeView;
     template <typename T> class _Matrix;
     template <typename T> class _MatrixInputter;
+    template <typename T> class _VectorWise;
 
     class _IsMatrix{
     public:
@@ -131,6 +133,21 @@ namespace Mx {
             return this->block(Range({beg_row,beg_col},{row_cnt,col_cnt}));
         };
 
+        virtual _VectorWise<T> col_wise() const {
+            return _VectorWise<T>(const_cast<_MatrixLike<T>&>(*this),Range({0,0},{this->rows(),1}),Position(0,1));
+        }
+
+        virtual _VectorWise<T> row_wise() const {
+            return _VectorWise<T>(const_cast<_MatrixLike<T>&>(*this),Range({0,0},{1,this->cols()}),Position(1,0));
+        }
+
+        virtual _VectorWise<T> col_wise() {
+            return _VectorWise<T>(*this,Range({0,0},{this->rows(),1}),Position(0,1));
+        }
+
+        virtual _VectorWise<T> row_wise() {
+            return _VectorWise<T>(*this,Range({0,0},{1,this->cols()}),Position(1,0));
+        }
 
         template<typename Func> _MatrixLike<T>& apply_inplace(const Func& func) {
             unsigned int cnt = this->count();
@@ -290,11 +307,11 @@ namespace Mx {
         };
 
         virtual T &operator()(unsigned int idx) {
-            return this->refmat()(idx/this->cols(),idx%this->cols());
+            return this->refmat()(_row_index[idx/this->cols()],_col_index[idx%this->cols()]);
         }
 
         virtual const T &operator()(unsigned int idx) const {
-            return this->refmat()(idx/this->cols(),idx%this->cols());
+            return this->refmat()(_row_index[idx / this->cols()], _col_index[idx%this->cols()]);
         }
 
         virtual MatrixLike<T> clone() const {
@@ -539,7 +556,7 @@ namespace Mx {
 
         _Matrix<T>&operator=(_Matrix<T>&& _mat) {
             if(this->_data != nullptr){
-                delete this->_data;
+                delete[] this->_data;
                 this->_data = nullptr;
             }
             this->_size = _mat._size;
@@ -557,9 +574,11 @@ namespace Mx {
 			delete this;
 		}
 
-		~_Matrix() {
-			delete _data;
-			_data = nullptr;
+		virtual ~_Matrix() {
+		    if(this->_data != nullptr) {
+                delete[] this->_data;
+                this->_data = nullptr;
+            }
 		}
     };
 
@@ -580,13 +599,16 @@ namespace Mx {
             Wrapper::_ptr = ptr;
         }
 
-        virtual ~Wrapper() {
+        virtual ~Wrapper() {}
+    };
 
-        }
+    class IsMatrix{
+    public:
+        virtual ~IsMatrix() {}
     };
 
     template <typename T>
-    class MatrixLike : public Wrapper {
+    class MatrixLike : public Wrapper, public IsMatrix {
     public:
         _MatrixLike<T>* operator->() {
             return (_MatrixLike<T>*)get_ptr();
@@ -922,6 +944,344 @@ namespace Mx {
 
         _MatrixInputter(_MatrixLike<T> &mat, unsigned int idx=0) : _mat(mat), _idx(idx) {}
     };
+
+
+    template <typename T>
+    class _VectorWise {
+    public:
+        _MatrixLike<T> &get_mat() const {
+            return _mat;
+        }
+
+        void set_mat(_MatrixLike<T> &_mat) {
+            _VectorWise::_mat = _mat;
+        }
+
+        const Range &get_init_range() const {
+            return _init_range;
+        }
+
+        void set_init_range(const Range &_init_range) {
+            _VectorWise::_init_range = _init_range;
+        }
+
+        const Position &get_offset() const {
+            return _offset;
+        }
+
+        void set_offset(const Position &_offset) {
+            _VectorWise::_offset = _offset;
+        }
+
+    protected:
+        _MatrixLike<T>& _mat;
+        Range _init_range;
+        Position _offset;
+    public:
+        _VectorWise(_MatrixLike<T> &_mat, const Range &_init_range, const Position &_offset)
+        : _mat(_mat), _init_range(_init_range), _offset(_offset) {}
+
+        _VectorItems<T> items() {
+            return _VectorItems<T>(_mat,_init_range,_offset);
+        }
+
+        _VectorItems<T> items() const {
+            return _VectorItems<T>(_mat,_init_range,_offset);
+        }
+    };
+
+    template <typename Func, template <typename> class M1,typename T1,
+            typename = std::enable_if_t<
+                    std::is_base_of_v<IsMatrix,M1<T1>>
+                 && !std::is_base_of_v<IsMatrix,T1>, int>>
+    M1<T1>& apply_inplace(M1<T1>&a,const Func& func) {
+        unsigned int cnt = a->count();
+        for(unsigned int i=0;i<cnt;i++)
+            func(a(i));
+        return a;
+    }
+
+    template <typename Func, template <typename> class M1,typename T1,
+            template <typename> class M2,typename T2,
+            typename = std::enable_if_t<
+                    std::is_base_of_v<IsMatrix,M1<T1>> && !std::is_base_of_v<IsMatrix,T1>
+                    && std::is_base_of_v<IsMatrix,M2<T2>> && !std::is_base_of_v<IsMatrix,T2>,int>>
+    M1<T1>& apply_inplace_2(M1<T1>&a,const M2<T2>&b,const Func& func) {
+        unsigned int cnt = a->count();
+        for(unsigned int i=0;i<cnt;i++)
+            func(a(i),b(i));
+        return a;
+    }
+
+    template <typename Func, template <typename> class M1,typename T1,
+            typename = std::enable_if_t<
+                    std::is_base_of_v<IsMatrix,M1<T1>>
+                    && !std::is_base_of_v<IsMatrix,T1>, int>>
+    Matrix<Func(T1)> apply(const M1<T1>&a, const Func& func) {
+        Matrix<Func(T1)> ret(a->size());
+        unsigned int cnt = a->count();
+        for(unsigned int i=0;i<cnt;i++)
+            ret(i) = func(a(i));
+        return ret;
+    }
+
+    template <typename Func, template <typename> class M1,typename T1,
+            template <typename> class M2,typename T2,
+            typename = std::enable_if_t<
+                    std::is_base_of_v<IsMatrix,M1<T1>> && !std::is_base_of_v<IsMatrix,T1>
+                    && std::is_base_of_v<IsMatrix,M2<T2>> && !std::is_base_of_v<IsMatrix,T2>,int>>
+    Matrix<Func(T1,T2)> apply_2(const M1<T1>& a, const M2<T2>& b, const Func& func) {
+        Matrix<Func(T1,T2)> ret(a->size());
+        unsigned int cnt = a->count();
+        for(unsigned int i=0;i<cnt;i++)
+            ret(i) = func(a(i),b(i));
+        return ret;
+    }
+
+    #define MATRIX_OP(OP) \
+    template <template <typename> class M1,typename T1, \
+              typename = std::enable_if_t< \
+                 std::is_base_of_v<IsMatrix,M1<T1>> && !std::is_base_of_v<IsMatrix,T1>,int>> \
+    auto operator OP(const M1<T1>&a) { \
+        Matrix<decltype(OP T1())> ret(a->size()); \
+        unsigned int cnt = a->count(); \
+        for(unsigned int i=0;i<cnt;i++) \
+            ret(i) = OP a(i); \
+        return ret; \
+    };
+
+
+    #define MATRIX_MATRIX_OP(OP) \
+    template <template <typename> class M1,typename T1, \
+              template <typename> class M2,typename T2, \
+              typename = std::enable_if_t< \
+                 std::is_base_of_v<IsMatrix,M1<T1>> && !std::is_base_of_v<IsMatrix,T1> \
+              && std::is_base_of_v<IsMatrix,M2<T2>> && !std::is_base_of_v<IsMatrix,T2>,int>> \
+    auto operator OP(const M1<T1>&a,const M2<T2>&b) { \
+        Matrix<decltype(T1() OP T2())> ret(a->size()); \
+        unsigned int cnt = a->count(); \
+        for(unsigned int i=0;i<cnt;i++) \
+            ret(i) = a(i) OP b(i); \
+        return ret; \
+    };
+
+    #define MATRIX_MATRIX_ASSIGN_OP(OP) \
+    template <template <typename> class M1,typename T1, \
+              template <typename> class M2,typename T2, \
+              typename = std::enable_if_t< \
+                 std::is_base_of_v<IsMatrix,M1<T1>> && !std::is_base_of_v<IsMatrix,T1> \
+              && std::is_base_of_v<IsMatrix,M2<T2>> && !std::is_base_of_v<IsMatrix,T2>,int>> \
+    auto operator OP(M1<T1>&a,const M2<T2>&b) { \
+        unsigned int cnt = a->count(); \
+        for(unsigned int i=0;i<cnt;i++) \
+            a(i) OP b(i); \
+        return a; \
+    };
+
+    #define MATRIX_ELEMENT_OP(OP) \
+    template <template <typename> class M1,typename T1, \
+              typename T2, \
+              typename = std::enable_if_t< \
+                 std::is_base_of_v<IsMatrix,M1<T1>> && !std::is_base_of_v<IsMatrix,T1> \
+              && !std::is_base_of_v<IsMatrix,T2>,int>> \
+    auto operator OP(const M1<T1>&a,const T2&b) { \
+        Matrix<decltype(T1() OP T2())> ret(a->size()); \
+        unsigned int cnt = a->count(); \
+        for(unsigned int i=0;i<cnt;i++) \
+            ret(i) = a(i) OP b; \
+        return ret; \
+    };
+
+    #define ELEMENT_MATRIX_OP(OP) \
+    template <typename T1, \
+              template <typename> class M2,typename T2,\
+              typename = std::enable_if_t< \
+                 std::is_base_of_v<IsMatrix,M2<T2>> && !std::is_base_of_v<IsMatrix,T2> \
+              && !std::is_base_of_v<IsMatrix,T1> && !std::is_base_of_v<std::ostream,T1>,int>> \
+    auto operator OP(const T1&a,const M2<T2>&b) { \
+        Matrix<decltype(T1() OP T2())> ret(b->size()); \
+        unsigned int cnt = b->count(); \
+        for(unsigned int i=0;i<cnt;i++) \
+            ret(i) = a OP b(i); \
+        return ret; \
+    };
+
+    #define MATRIX_ELEMENT_ASSIGN_OP(OP) \
+    template <template <typename> class M1,typename T1, \
+              typename T2, \
+              typename = std::enable_if_t< \
+                 std::is_base_of_v<IsMatrix,M1<T1>> && !std::is_base_of_v<IsMatrix,T1> \
+              && !std::is_base_of_v<IsMatrix,T2>,int>> \
+    auto operator OP(M1<T1>&a,const T2&b) { \
+        unsigned int cnt = a->count(); \
+        for(unsigned int i=0;i<cnt;i++) \
+            a(i) OP b; \
+        return a; \
+    };
+
+
+    #define VECTORWISE_MATRIX_OP(OP) \
+    template <typename T1, \
+              template <typename> class M2,typename T2, \
+              typename = std::enable_if_t< \
+                 !std::is_base_of_v<IsMatrix,T1> \
+              && std::is_base_of_v<IsMatrix,M2<T2>> && !std::is_base_of_v<IsMatrix,T2>,int>> \
+    auto operator OP(const _VectorWise<T1>&a,const M2<T2>&b) { \
+        auto & mat = a.get_mat(); \
+        auto items = a.items(); \
+        Matrix<decltype(T1() OP T2())> ret(mat.size()); \
+        Range ret_rng = a.get_init_range(); \
+        Position offset = a.get_offset(); \
+        for(auto v:items) { \
+            ret->block(ret_rng) = v OP b; \
+            ret_rng.beg.row += offset.row; \
+            ret_rng.beg.col += offset.col; \
+        } \
+        return ret;\
+    };
+
+
+    #define MATRIX_VECTORWISE_OP(OP) \
+    template <template <typename> class M1,typename T1,\
+              typename T2, \
+              typename = std::enable_if_t< \
+                 !std::is_base_of_v<IsMatrix,T2> \
+              && std::is_base_of_v<IsMatrix,M1<T1>> && !std::is_base_of_v<IsMatrix,T1>,int>> \
+    auto operator OP(const M1<T1>&a, const _VectorWise<T2>&b) { \
+        auto & mat = b.get_mat(); \
+        auto items = b.items(); \
+        Matrix<decltype(T1() OP T2())> ret(mat.size()); \
+        Range ret_rng = b.get_init_range(); \
+        Position offset = b.get_offset(); \
+        for(auto v:items) { \
+            ret->block(ret_rng) = a OP v; \
+            ret_rng.beg.row += offset.row; \
+            ret_rng.beg.col += offset.col; \
+        } \
+        return ret;\
+    };
+
+    MATRIX_OP(+)
+    MATRIX_OP(-)
+    MATRIX_OP(~)
+    MATRIX_OP(!)
+
+    MATRIX_MATRIX_OP(+ )
+    MATRIX_MATRIX_OP(- )
+    MATRIX_MATRIX_OP(* )
+    MATRIX_MATRIX_OP(/ )
+    MATRIX_MATRIX_OP(% )
+    MATRIX_MATRIX_OP(^ )
+    MATRIX_MATRIX_OP(& )
+    MATRIX_MATRIX_OP(| )
+    MATRIX_MATRIX_OP(< )
+    MATRIX_MATRIX_OP(> )
+    MATRIX_MATRIX_OP(<<)
+    MATRIX_MATRIX_OP(>>)
+    MATRIX_MATRIX_OP(==)
+    MATRIX_MATRIX_OP(!=)
+    MATRIX_MATRIX_OP(<=)
+    MATRIX_MATRIX_OP(>=)
+    MATRIX_MATRIX_OP(&&)
+    MATRIX_MATRIX_OP(||)
+
+    MATRIX_MATRIX_ASSIGN_OP(+= )
+    MATRIX_MATRIX_ASSIGN_OP(-= )
+    MATRIX_MATRIX_ASSIGN_OP(*= )
+    MATRIX_MATRIX_ASSIGN_OP(/= )
+    MATRIX_MATRIX_ASSIGN_OP(%= )
+    MATRIX_MATRIX_ASSIGN_OP(^= )
+    MATRIX_MATRIX_ASSIGN_OP(&= )
+    MATRIX_MATRIX_ASSIGN_OP(|= )
+    MATRIX_MATRIX_ASSIGN_OP(>>=)
+    MATRIX_MATRIX_ASSIGN_OP(<<=)
+
+    MATRIX_ELEMENT_OP(+ )
+    MATRIX_ELEMENT_OP(- )
+    MATRIX_ELEMENT_OP(* )
+    MATRIX_ELEMENT_OP(/ )
+    MATRIX_ELEMENT_OP(% )
+    MATRIX_ELEMENT_OP(^ )
+    MATRIX_ELEMENT_OP(& )
+    MATRIX_ELEMENT_OP(| )
+    MATRIX_ELEMENT_OP(< )
+    MATRIX_ELEMENT_OP(> )
+    MATRIX_ELEMENT_OP(<<)
+    MATRIX_ELEMENT_OP(>>)
+    MATRIX_ELEMENT_OP(==)
+    MATRIX_ELEMENT_OP(!=)
+    MATRIX_ELEMENT_OP(<=)
+    MATRIX_ELEMENT_OP(>=)
+    MATRIX_ELEMENT_OP(&&)
+    MATRIX_ELEMENT_OP(||)
+
+    ELEMENT_MATRIX_OP(+ )
+    ELEMENT_MATRIX_OP(- )
+    ELEMENT_MATRIX_OP(* )
+    ELEMENT_MATRIX_OP(/ )
+    ELEMENT_MATRIX_OP(% )
+    ELEMENT_MATRIX_OP(^ )
+    ELEMENT_MATRIX_OP(& )
+    ELEMENT_MATRIX_OP(| )
+    ELEMENT_MATRIX_OP(< )
+    ELEMENT_MATRIX_OP(> )
+    ELEMENT_MATRIX_OP(<<)
+    ELEMENT_MATRIX_OP(>>)
+    ELEMENT_MATRIX_OP(==)
+    ELEMENT_MATRIX_OP(!=)
+    ELEMENT_MATRIX_OP(<=)
+    ELEMENT_MATRIX_OP(>=)
+    ELEMENT_MATRIX_OP(&&)
+    ELEMENT_MATRIX_OP(||)
+
+    MATRIX_ELEMENT_ASSIGN_OP(+= )
+    MATRIX_ELEMENT_ASSIGN_OP(-= )
+    MATRIX_ELEMENT_ASSIGN_OP(*= )
+    MATRIX_ELEMENT_ASSIGN_OP(/= )
+    MATRIX_ELEMENT_ASSIGN_OP(%= )
+    MATRIX_ELEMENT_ASSIGN_OP(^= )
+    MATRIX_ELEMENT_ASSIGN_OP(&= )
+    MATRIX_ELEMENT_ASSIGN_OP(|= )
+    MATRIX_ELEMENT_ASSIGN_OP(>>=)
+    MATRIX_ELEMENT_ASSIGN_OP(<<=)
+
+    MATRIX_VECTORWISE_OP(+ )
+    MATRIX_VECTORWISE_OP(- )
+    MATRIX_VECTORWISE_OP(* )
+    MATRIX_VECTORWISE_OP(/ )
+    MATRIX_VECTORWISE_OP(% )
+    MATRIX_VECTORWISE_OP(^ )
+    MATRIX_VECTORWISE_OP(& )
+    MATRIX_VECTORWISE_OP(| )
+    MATRIX_VECTORWISE_OP(< )
+    MATRIX_VECTORWISE_OP(> )
+    MATRIX_VECTORWISE_OP(<<)
+    MATRIX_VECTORWISE_OP(>>)
+    MATRIX_VECTORWISE_OP(==)
+    MATRIX_VECTORWISE_OP(!=)
+    MATRIX_VECTORWISE_OP(<=)
+    MATRIX_VECTORWISE_OP(>=)
+    MATRIX_VECTORWISE_OP(&&)
+    MATRIX_VECTORWISE_OP(||)
+
+    VECTORWISE_MATRIX_OP(+ )
+    VECTORWISE_MATRIX_OP(- )
+    VECTORWISE_MATRIX_OP(* )
+    VECTORWISE_MATRIX_OP(/ )
+    VECTORWISE_MATRIX_OP(% )
+    VECTORWISE_MATRIX_OP(^ )
+    VECTORWISE_MATRIX_OP(& )
+    VECTORWISE_MATRIX_OP(| )
+    VECTORWISE_MATRIX_OP(< )
+    VECTORWISE_MATRIX_OP(> )
+    VECTORWISE_MATRIX_OP(<<)
+    VECTORWISE_MATRIX_OP(>>)
+    VECTORWISE_MATRIX_OP(==)
+    VECTORWISE_MATRIX_OP(!=)
+    VECTORWISE_MATRIX_OP(<=)
+    VECTORWISE_MATRIX_OP(>=)
+    VECTORWISE_MATRIX_OP(&&)
+    VECTORWISE_MATRIX_OP(||)
 }
 
 
