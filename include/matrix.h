@@ -864,6 +864,8 @@ namespace Mx {
 
         Matrix(unsigned int rows,unsigned int cols,T v) : MatrixLike<T>(new _Matrix<T>(rows,cols,v)) {}
 
+        Matrix(unsigned int rows,unsigned int cols) : MatrixLike<T>(new _Matrix<T>(rows,cols,T(0))) {}
+
         Matrix(const Size &size,T v) : MatrixLike<T>(new _Matrix<T>(size,v)) {}
 
         Matrix(const Size &size) : MatrixLike<T>(new _Matrix<T>(size)) {}

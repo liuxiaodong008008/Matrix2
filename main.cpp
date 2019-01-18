@@ -28,5 +28,15 @@ int main() {
 
     cout<<e->row({1,2,3,1,2,3,0,4,1,2,3,0})<<endl;
 
+    {
+        auto m = matmul(mat,mat,mat,mat);
+        cout<<m<<endl;
+    }
+
+    {
+        auto m = sum(mat,REDUCE_DIRECTION::VERTICAL);
+        cout<<m<<endl;
+    }
+
 	_CrtDumpMemoryLeaks();
 }
